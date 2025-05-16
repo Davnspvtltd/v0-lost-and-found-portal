@@ -27,6 +27,7 @@ export default function AuthPage() {
   const [loginPassword, setLoginPassword] = useState("")
 
   // Register form state
+  const [registerName, setRegisterName] = useState("")
   const [registerEmail, setRegisterEmail] = useState("")
   const [registerPassword, setRegisterPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -57,6 +58,16 @@ export default function AuthPage() {
     setIsLoading(true)
 
     try {
+      if (!registerName.trim()) {
+        toast({
+          title: "Name is required",
+          description: "Please enter your name.",
+          variant: "destructive",
+        })
+        setIsLoading(false)
+        return
+      }
+
       if (registerPassword !== confirmPassword) {
         toast({
           title: "Passwords don't match",
@@ -67,7 +78,7 @@ export default function AuthPage() {
         return
       }
 
-      await signUp(registerEmail, registerPassword, isAdmin ? securityCode : undefined)
+      await signUp(registerEmail, registerPassword, isAdmin ? securityCode : undefined, registerName)
     } catch (error) {
       console.error(error)
     } finally {
@@ -144,6 +155,18 @@ export default function AuthPage() {
                 <CardDescription>Enter your details to create a new account</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="register-name">Name</Label>
+                  <Input
+                    id="register-name"
+                    type="text"
+                    placeholder="John Doe"
+                    value={registerName}
+                    onChange={(e) => setRegisterName(e.target.value)}
+                    required
+                    disabled={isLoading}
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="register-email">Email</Label>
                   <Input

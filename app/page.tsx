@@ -30,7 +30,7 @@ export default async function Home() {
               <div className="space-y-2">
                 {userProfile ? (
                   <h1 className="text-3xl font-bold tracking-tighter sm:text-5xl xl:text-6xl/none">
-                    Welcome to the Lost & Found Portal, {userProfile.email.split("@")[0]}!
+                    Welcome to the Lost & Found Portal, {userProfile.name || userProfile.email.split("@")[0]}!
                   </h1>
                 ) : (
                   <h1 className="text-3xl font-bold tracking-tighter sm:text-5xl xl:text-6xl/none">

@@ -35,8 +35,23 @@ export default function Header() {
 
   // Get user initials for avatar
   const getUserInitials = () => {
-    if (!user?.email) return "U"
+    if (!user) return "U"
+
+    if (user.name) {
+      const nameParts = user.name.split(" ")
+      if (nameParts.length === 1) {
+        return nameParts[0].charAt(0).toUpperCase()
+      }
+      return (nameParts[0].charAt(0) + nameParts[nameParts.length - 1].charAt(0)).toUpperCase()
+    }
+
     return user.email.charAt(0).toUpperCase()
+  }
+
+  // Get display name
+  const getDisplayName = () => {
+    if (!user) return ""
+    return user.name || user.email.split("@")[0]
   }
 
   return (
@@ -83,7 +98,8 @@ export default function Header() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem className="font-medium">Signed in as: {user.email}</DropdownMenuItem>
+                  <DropdownMenuItem className="font-medium">Signed in as: {getDisplayName()}</DropdownMenuItem>
+                  <DropdownMenuItem className="text-muted-foreground text-xs">{user.email}</DropdownMenuItem>
                   <DropdownMenuItem>
                     <Link href="/dashboard" className="w-full">
                       Dashboard
