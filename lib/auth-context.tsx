@@ -10,15 +10,21 @@ type User = {
   id: string
   email: string
   name?: string
-  role: string // Changed from specific "user" | "admin" type to string
+  role: string
 }
 
 type AuthContextType = {
   user: User | null
   isLoading: boolean
   isAdmin: boolean
-  signIn: (email: string, password: string) => Promise<void>
-  signUp: (email: string, password: string, securityCode?: string, name?: string) => Promise<void>
+  signIn: (email: string, password: string, captchaToken?: string) => Promise<void>
+  signUp: (
+    email: string,
+    password: string,
+    securityCode?: string,
+    name?: string,
+    captchaToken?: string,
+  ) => Promise<void>
   signOut: () => Promise<void>
 }
 
@@ -59,52 +65,63 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log("[Auth] Session found for user:", session.user.id)
 
       // First check if profile exists
-      const { data: profiles, error: profilesError } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .select("*")
         .eq("id", session.user.id)
+        .maybeSingle() // Use maybeSingle to avoid errors if no profile exists
 
-      if (profilesError) {
-        console.error("[Auth] Profiles fetch error:", profilesError.message)
+      if (profileError) {
+        console.error("[Auth] Profiles fetch error:", profileError.message)
         setUser(null)
         return
       }
 
-      // If no profile exists, create one
-      if (!profiles || profiles.length === 0) {
+      // If no profile exists, create one using upsert
+      if (!profile) {
         console.log("[Auth] No profile found, creating one")
 
         const name = getNameFromEmail(session.user.email || "")
 
-        // First, let's check what roles are allowed in the database
-        const { data: roleInfo, error: roleError } = await supabase
-          .from("information_schema.columns")
-          .select("udt_name, column_default, is_nullable, character_maximum_length")
-          .eq("table_name", "profiles")
-          .eq("column_name", "role")
-          .single()
+        // Use upsert with on_conflict to handle potential race conditions
+        const { error: upsertError } = await supabase.from("profiles").upsert(
+          {
+            id: session.user.id,
+            email: session.user.email,
+            name: name,
+            role: "employee", // Valid role based on the constraint
+          },
+          { onConflict: "id" }, // Specify the conflict column
+        )
 
-        if (roleError) {
-          console.error("[Auth] Error fetching role constraints:", roleError.message)
-        }
+        if (upsertError) {
+          console.error("[Auth] Error creating profile:", upsertError.message)
 
-        console.log("[Auth] Role column info:", roleInfo)
+          // If there's still an error, try to fetch the profile again
+          // It might have been created by another concurrent process
+          const { data: existingProfile, error: fetchError } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", session.user.id)
+            .single()
 
-        // Insert with default role (let the database set the default)
-        const { error: insertError } = await supabase.from("profiles").insert({
-          id: session.user.id,
-          email: session.user.email,
-          name: name,
-          // Don't specify role, let the database use its default value
-        })
+          if (fetchError) {
+            console.error("[Auth] Error fetching profile after upsert error:", fetchError.message)
+            setUser(null)
+            return
+          }
 
-        if (insertError) {
-          console.error("[Auth] Error creating profile:", insertError.message)
-          setUser(null)
+          // Use the existing profile
+          setUser({
+            id: session.user.id,
+            email: session.user.email || "",
+            name: existingProfile.name,
+            role: existingProfile.role,
+          })
           return
         }
 
-        // Fetch the newly created profile to get the default role
+        // Fetch the newly created profile
         const { data: newProfile, error: fetchError } = await supabase
           .from("profiles")
           .select("*")
@@ -124,8 +141,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: newProfile.role,
         })
       } else {
-        // Profile exists, use the first one
-        const profile = profiles[0]
+        // Profile exists, use it
         setUser({
           id: session.user.id,
           email: session.user.email || "",
@@ -162,14 +178,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string, captchaToken?: string) => {
     console.log("[Auth] Attempting to sign in:", email)
     setIsLoading(true)
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+      // Use the provided captcha token if available
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+        options: {
+          captchaToken: captchaToken || undefined,
+        },
+      })
 
       if (error) {
         console.error("[Auth] Sign-in error:", error.message)
+
+        // If the error is related to captcha, provide a more helpful message
+        if (error.message.includes("captcha")) {
+          throw new Error("Please complete the captcha verification to sign in.")
+        }
+
         throw error
       }
 
@@ -194,10 +223,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         variant: "destructive",
       })
       setIsLoading(false)
+      throw error
     }
   }
 
-  const signUp = async (email: string, password: string, securityCode?: string, name?: string) => {
+  const signUp = async (
+    email: string,
+    password: string,
+    securityCode?: string,
+    name?: string,
+    captchaToken?: string,
+  ) => {
     console.log("[Auth] Attempting to sign up:", email)
     setIsLoading(true)
     try {
@@ -207,9 +243,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error("Invalid security code")
       }
 
-      const { error, data } = await supabase.auth.signUp({ email, password })
+      // Use the provided captcha token if available
+      const { error, data } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          captchaToken: captchaToken || undefined,
+        },
+      })
 
       if (error) {
+        // If the error is related to captcha, provide a more helpful message
+        if (error.message.includes("captcha")) {
+          throw new Error("Please complete the captcha verification to sign up.")
+        }
+
         throw error
       }
 
@@ -217,54 +265,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Use provided name or generate one from email
         const userName = name || getNameFromEmail(email)
 
-        // Create profile without specifying role for regular users
-        const profileData: any = {
-          id: data.user.id,
-          email: data.user.email,
-          name: userName,
-        }
-
-        // Only set role for admin registrations
-        if (isAdminRegistration) {
-          // First, let's check what roles are allowed in the database
-          const { data: roleInfo, error: roleError } = await supabase
-            .from("information_schema.columns")
-            .select("udt_name, column_default, is_nullable, character_maximum_length")
-            .eq("table_name", "profiles")
-            .eq("column_name", "role")
-            .single()
-
-          if (roleError) {
-            console.error("[Auth] Error fetching role constraints:", roleError.message)
-          } else {
-            console.log("[Auth] Role column info:", roleInfo)
-
-            // Let's try to set the role to 'admin' if it's an admin registration
-            // If this fails, we'll handle it in the catch block
-            profileData.role = "admin"
-          }
-        }
-
-        // Create profile
-        const { error: profileError } = await supabase.from("profiles").insert(profileData)
+        // Create profile with appropriate role based on the constraint
+        // Use upsert to handle potential race conditions
+        const { error: profileError } = await supabase.from("profiles").upsert(
+          {
+            id: data.user.id,
+            email: data.user.email,
+            name: userName,
+            role: isAdminRegistration ? "admin" : "employee", // Valid roles based on the constraint
+          },
+          { onConflict: "id" },
+        )
 
         if (profileError) {
           console.error("[Auth] Error creating profile:", profileError.message)
-
-          // If there was an error with the role, try again without specifying it
-          if (profileError.message.includes("role")) {
-            const { error: retryError } = await supabase.from("profiles").insert({
-              id: data.user.id,
-              email: data.user.email,
-              name: userName,
-            })
-
-            if (retryError) {
-              throw new Error("Failed to create user profile: " + retryError.message)
-            }
-          } else {
-            throw new Error("Failed to create user profile: " + profileError.message)
-          }
+          throw new Error("Failed to create user profile: " + profileError.message)
         }
       }
 
@@ -281,6 +296,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         variant: "destructive",
       })
       setIsLoading(false)
+      throw error
     }
   }
 

@@ -54,6 +54,11 @@ export default function Header() {
     return user.name || user.email.split("@")[0]
   }
 
+  // Check if user has admin privileges
+  const hasAdminAccess = () => {
+    return user && (user.role === "admin" || user.role === "manager")
+  }
+
   return (
     <header
       className={`fixed top-0 w-full z-50 transition-all duration-200 ${
@@ -110,7 +115,7 @@ export default function Header() {
                       My Items
                     </Link>
                   </DropdownMenuItem>
-                  {isAdmin && (
+                  {hasAdminAccess() && (
                     <DropdownMenuItem>
                       <Link href="/admin" className="w-full">
                         Admin Panel

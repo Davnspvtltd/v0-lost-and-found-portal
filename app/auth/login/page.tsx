@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth-context"
@@ -14,6 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useToast } from "@/components/ui/use-toast"
 import { Loader2 } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { SimpleCaptcha } from "@/components/simple-captcha"
 
 export default function AuthPage() {
   const { user, signIn, signUp } = useAuth()
@@ -21,6 +23,12 @@ export default function AuthPage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState("login")
+
+  // Captcha tokens
+  const [loginCaptchaToken, setLoginCaptchaToken] = useState<string | null>(null)
+  const [registerCaptchaToken, setRegisterCaptchaToken] = useState<string | null>(null)
 
   // Login form state
   const [loginEmail, setLoginEmail] = useState("")
@@ -40,13 +48,36 @@ export default function AuthPage() {
     }
   }, [user, router])
 
+  // Clear error when switching tabs
+  useEffect(() => {
+    setError(null)
+  }, [activeTab])
+
+  // Handle captcha verification for login
+  const handleLoginCaptchaVerify = useCallback((token: string) => {
+    setLoginCaptchaToken(token)
+  }, [])
+
+  // Handle captcha verification for registration
+  const handleRegisterCaptchaVerify = useCallback((token: string) => {
+    setRegisterCaptchaToken(token)
+  }, [])
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
+    setError(null)
+
+    if (!loginCaptchaToken) {
+      setError("Please complete the captcha verification")
+      setIsLoading(false)
+      return
+    }
 
     try {
-      await signIn(loginEmail, loginPassword)
-    } catch (error) {
+      await signIn(loginEmail, loginPassword, loginCaptchaToken)
+    } catch (error: any) {
+      setError(error.message)
       console.error(error)
     } finally {
       setIsLoading(false)
@@ -56,6 +87,13 @@ export default function AuthPage() {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
+    setError(null)
+
+    if (!registerCaptchaToken) {
+      setError("Please complete the captcha verification")
+      setIsLoading(false)
+      return
+    }
 
     try {
       if (!registerName.trim()) {
@@ -78,8 +116,15 @@ export default function AuthPage() {
         return
       }
 
-      await signUp(registerEmail, registerPassword, isAdmin ? securityCode : undefined, registerName)
-    } catch (error) {
+      await signUp(
+        registerEmail,
+        registerPassword,
+        isAdmin ? securityCode : undefined,
+        registerName,
+        registerCaptchaToken,
+      )
+    } catch (error: any) {
+      setError(error.message)
       console.error(error)
     } finally {
       setIsLoading(false)
@@ -89,7 +134,7 @@ export default function AuthPage() {
   return (
     <div className="container flex items-center justify-center min-h-screen py-12">
       <Card className="w-full max-w-md">
-        <Tabs defaultValue="login">
+        <Tabs defaultValue="login" onValueChange={setActiveTab} value={activeTab}>
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="login">Login</TabsTrigger>
             <TabsTrigger value="register">Register</TabsTrigger>
@@ -102,6 +147,12 @@ export default function AuthPage() {
                 <CardDescription>Enter your credentials to access your account</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
                   <Input
@@ -133,9 +184,12 @@ export default function AuthPage() {
                     disabled={isLoading}
                   />
                 </div>
+
+                {/* Captcha component */}
+                <SimpleCaptcha onVerify={handleLoginCaptchaVerify} />
               </CardContent>
               <CardFooter>
-                <Button type="submit" className="w-full" disabled={isLoading}>
+                <Button type="submit" className="w-full" disabled={isLoading || !loginCaptchaToken}>
                   {isLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Signing in...
@@ -155,6 +209,12 @@ export default function AuthPage() {
                 <CardDescription>Enter your details to create a new account</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {error && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{error}</AlertDescription>
+                  </Alert>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="register-name">Name</Label>
                   <Input
@@ -228,9 +288,12 @@ export default function AuthPage() {
                     />
                   </div>
                 )}
+
+                {/* Captcha component */}
+                <SimpleCaptcha onVerify={handleRegisterCaptchaVerify} />
               </CardContent>
               <CardFooter>
-                <Button type="submit" className="w-full" disabled={isLoading}>
+                <Button type="submit" className="w-full" disabled={isLoading || !registerCaptchaToken}>
                   {isLoading ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating account...
